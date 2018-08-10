@@ -37,6 +37,7 @@ typedef double KcpevTimestamp;
 enum Command
 {
     COMMAND_DATA = 1,           // 普通数据
+    COMMAND_SHAKE_HAND0,        // 握手第0次
     COMMAND_SHAKE_HAND1,        // 握手第一次
     COMMAND_SHAKE_HAND2,        // 握手第二次
     COMMAND_HEARTBEAT1,         // 心跳

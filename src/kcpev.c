@@ -116,7 +116,7 @@ void KcpevUdp_destroy(struct ev_loop *loop, KcpevUdp *evs)
 
 void kcpev_destroy(Kcpev *kcpev)
 {
-    KcpevTcp_destroy(kcpev->loop, &kcpev->tcp);
+    //KcpevTcp_destroy(kcpev->loop, &kcpev->tcp);
     KcpevUdp_destroy(kcpev->loop, &kcpev->udp);
     kcpev_free(kcpev);
 }
@@ -196,6 +196,7 @@ int kcpev_bind_socket(KcpevSock *sock, int sock_type, const char *port, int fami
         /*check_goto(ret >= 0, "setnonblocking", sock_error);*/
 
         sock->sock = s;
+        debug("bind socket : %d\n", s);
         break;
 
     sock_error:
@@ -229,18 +230,18 @@ int kcpev_bind(Kcpev *kcpev, const char *port, int family, int reuse)
     int ret = 0;
 
     // tcp连接是必须的
-    ret = kcpev_bind_tcp(&kcpev->tcp, port, family, reuse);
-    check(ret >= 0, "kcpev_bind_tcp");
+    //ret = kcpev_bind_tcp(&kcpev->tcp, port, family, reuse);
+    //check(ret >= 0, "kcpev_bind_tcp");
 
     struct sockaddr_storage client_addr;
     socklen_t addr_size = sizeof(client_addr);
     char hbuf[KCPEV_NI_MAXHOST], sbuf[KCPEV_NI_MAXSERV];
-    ret = getsockname(kcpev->tcp.sock, (struct sockaddr*)&client_addr, &addr_size);
-    check(ret >= 0, "getpeername");
-    ret = getnameinfo((struct sockaddr *)&client_addr, addr_size, hbuf, sizeof(hbuf), \
+    //ret = getsockname(kcpev->tcp.sock, (struct sockaddr*)&client_addr, &addr_size);
+    //check(ret >= 0, "getpeername");
+    //ret = getnameinfo((struct sockaddr *)&client_addr, addr_size, hbuf, sizeof(hbuf), \
         sbuf, sizeof(sbuf), NI_NUMERICHOST | NI_NUMERICSERV);
-    check(ret >= 0, "getnameinfo");
-    debug("local tcp port[%s : %s]", hbuf, sbuf);
+    //check(ret >= 0, "getnameinfo");
+    //debug("local tcp port[%s : %s]", hbuf, sbuf);
 
     // 如果udp创建失败，会退化到用tcp来通信
     ret = kcpev_bind_udp(&kcpev->udp, port, family, reuse);
@@ -260,6 +261,7 @@ error:
 
 int kcpev_connect_socket(KcpevSock *sock, int sock_type, const char *address, const char *port)
 {
+    debug("kcpev connect socket = %d\n", sock->sock);
     if(!sock->sock)
         return -1;
 
@@ -301,7 +303,18 @@ inline int kcpev_connect_tcp(KcpevTcp *sock, const char *address, const char *po
 
 inline int kcpev_connect_udp(KcpevUdp *sock, const char *address, const char *port)
 {
-    return kcpev_connect_socket((KcpevSock *)sock, SOCK_DGRAM, address, port);
+    int ret = kcpev_connect_socket((KcpevSock *)sock, SOCK_DGRAM, address, port);
+    if (ret != 0)
+        debug("kcpev connect socket error\n");
+
+    //todo add handshake
+    char msg[16] = "hello";
+    int len = strlen(msg);
+    ret = sock_send_command(sock->sock, COMMAND_SHAKE_HAND0, msg, len);
+    if (ret != 0)
+        debug("send command handshake0 error\n");
+
+    return ret;
 }
 
 int kcpev_connect(Kcpev *kcpev, const char *address, const char *port)
@@ -309,8 +322,8 @@ int kcpev_connect(Kcpev *kcpev, const char *address, const char *port)
     int ret = 0;
 
     // tcp连接是必须的
-    ret = kcpev_connect_tcp(&kcpev->tcp, address, port);
-    check(ret >= 0, "kcpev_connect_tcp");
+    //ret = kcpev_connect_tcp(&kcpev->tcp, address, port);
+    //check(ret >= 0, "kcpev_connect_tcp");
 
     // 如果udp连接失败，会退化到用tcp来通信
     ret = kcpev_connect_udp(&kcpev->udp, address, port);
@@ -322,12 +335,10 @@ int kcpev_connect(Kcpev *kcpev, const char *address, const char *port)
             close(kcpev->udp.sock);
             kcpev->udp.sock = 0;
         }
-
     }
     else if(kcpev->udp.kcp)
     {
         kcpev->udp.kcp->user = (void *)&kcpev->udp;
-
     }
 
     return 0;
@@ -354,11 +365,11 @@ int kcpev_init_ev(Kcpev *kcpev, struct ev_loop *loop, void *data, ev_io_callback
     kcpev->loop = loop;
 	int ret = -1;
 
-	if(tcp_cb)
-	{
-		ret = kcpev_set_ev(loop, data, (KcpevSock *)&kcpev->tcp, tcp_cb);
-		check(ret >= 0, "set tcp ev");
-	}
+	//if(tcp_cb)
+	//{
+		//ret = kcpev_set_ev(loop, data, (KcpevSock *)&kcpev->tcp, tcp_cb);
+		//check(ret >= 0, "set tcp ev");
+	//}
 
     if(udp_cb)
     {
@@ -581,19 +592,45 @@ int on_server_recv(KcpevServer *server, Kcpev *client, const char *buf, size_t l
             server->recv_cb(server, client, data, data_len);
             break;
 
+        case COMMAND_SHAKE_HAND0:
+            {
+                // create new client structure and add to server
+                Kcpev *client = kcpev_create();
+                check_mem(client);
+
+                client->server = server;
+                client->tcp.sock = -1;
+                uuid_generate(client->key.uuid);
+
+                // create hashtable for client kcpev
+                HASH_ADD(hh, server->hash, key, sizeof(KcpevKey), client);
+
+                char uuids[KCPEV_UUID_PARSE_SIZE];
+                uuid_unparse(client->key.uuid, uuids);
+                debug("accept client [%s : %s : %s]\n", hbuf, sbuf, uuids);
+                client->udp.status = UDP_SHAKING_HAND;
+
+                // udp may failed, if so, use tcp then
+                ret = connect_client_udp(client, server->port, client_addr, \
+                addr_size, server->loop);
+                check(ret >= 0, "connect_client_udp");
+
+                // shake hand
+                ret = sock_send_command(client->udp.sock, COMMAND_SHAKE_HAND1, (char *)&client->key, sizeof(KcpevKey));
+                check(ret == 0, "send client shake hand1");
+            }
+
+            break;
+
         case COMMAND_SHAKE_HAND1:
             check(data_len == sizeof(KcpevKey), "udp shake len error [%s : %s]", hbuf, sbuf);
 
             key = (KcpevKey *)data;
             client = NULL;
-            
+
             HASH_FIND(hh, server->hash, key, sizeof(KcpevKey), client);
             check(client, "udp shake client key not find [%s : %s]", hbuf, sbuf);
 
-            // udp may failed, if so, use tcp then
-            ret = connect_client_udp(client, server->port, client_addr, \
-                addr_size, server->loop);
-            check(ret >= 0, "connect_client_udp");
             client->udp.status = UDP_SHAKING_HAND;
 
             ret = sock_send_command(client->udp.sock, COMMAND_SHAKE_HAND2, (char *)&client->key, sizeof(KcpevKey));
@@ -1195,7 +1232,8 @@ Kcpev *kcpev_create_client(struct ev_loop *loop, const char *port, int family)
     ret = kcpev_create_kcp(&kcpev->udp, kcpev->key.split_key.conv, KCPEV_KCP_MODE);
     check(ret >= 0, "create kcp");
 
-    ret = kcpev_init_ev(kcpev, loop, kcpev, client_tcp_recv, client_udp_recv);
+    //ret = kcpev_init_ev(kcpev, loop, kcpev, client_tcp_recv, client_udp_recv);
+    ret = kcpev_init_ev(kcpev, loop, kcpev, NULL, client_udp_recv);
     check(ret >= 0, "init ev");
 
     return kcpev;
@@ -1225,11 +1263,12 @@ KcpevServer *kcpev_create_server(struct ev_loop *loop, const char *port, int fam
     ret = kcpev_bind((Kcpev *)kcpev, port, family, reuse);
     check(ret >= 0, "kcpev_server_bind");
 
-    ret = kcpev_init_ev((Kcpev *)kcpev, loop, kcpev, tcp_accept, server_udp_recv_all);
+    //ret = kcpev_init_ev((Kcpev *)kcpev, loop, kcpev, tcp_accept, server_udp_recv_all);
+    ret = kcpev_init_ev((Kcpev *)kcpev, loop, kcpev, NULL, server_udp_recv_all);
     check(ret >= 0, "init ev");
 
-    ret = kcpev_listen((Kcpev *)kcpev, backlog);
-    check(ret >= 0, "listen");
+    //ret = kcpev_listen((Kcpev *)kcpev, backlog);
+    //check(ret >= 0, "listen");
 
     return kcpev;
 
@@ -1334,9 +1373,10 @@ int kcpev_send_command(Kcpev *kcpev, uint8_t command, const char *msg, size_t le
     }
     else
     {
-        ret = send(kcpev->tcp.sock, buf, real_size, 0);
-        check(ret == real_size, "");
-        return 0;
+        //ret = send(kcpev->tcp.sock, buf, real_size, 0);
+        //check(ret == real_size, "");
+        //return 0;
+        return -1;
     }
 
 error:
