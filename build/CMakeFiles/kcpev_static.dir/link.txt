@@ -1,0 +1,2 @@
+/usr/bin/ar qc libkcpev_static.a  CMakeFiles/kcpev_static.dir/src/ikcp.c.o CMakeFiles/kcpev_static.dir/src/kcpev.c.o CMakeFiles/kcpev_static.dir/src/kcpev_ringbuf.c.o CMakeFiles/kcpev_static.dir/src/myuuid.c.o
+/usr/bin/ranlib libkcpev_static.a
