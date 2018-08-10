@@ -410,6 +410,12 @@ int udp_output(const char *buf, int len, ikcpcb *kcp, void *user)
     KcpevUdp *client = user;
     int ret = send(client->sock, buf, len, 0);
     check(ret == len, "send");
+    if (ret == -1 && (errno != EINTR || errno != EAGAIN))
+    {
+        //error
+        debug("send error, \n");
+        
+    }
 
 error:
     return 0;
@@ -949,7 +955,7 @@ void on_server_heartbeat_timer(EV_P_ ev_timer *w, int revents)
 		debug("server heart beat set invalid");
 
         set_kcp_invalid(client);
-        sock_send_command(client->tcp.sock, COMMAND_UDP_INVALID, (char *)&client->key, sizeof(KcpevKey));
+        //sock_send_command(client->tcp.sock, COMMAND_UDP_INVALID, (char *)&client->key, sizeof(KcpevKey));
         return;
     }
 }
