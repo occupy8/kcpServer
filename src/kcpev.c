@@ -18,6 +18,7 @@
 void server_udp_recv(EV_P_ struct ev_io *w, int revents);
 int kcp_send_command(Kcpev *kcpev, uint8_t command, const char *msg, size_t len);
 int check_create_kcp_timer(Kcpev *kcpev, timer_cb hcb);
+int check_destroy_kcp_timer(Kcpev *kcpev);
 int kcpev_set_ev(struct ev_loop *loop, void *data, KcpevSock *evs, ev_io_callback cb);
 int kcpev_create_kcp(KcpevUdp *udp, int conv, int kcp_mode);
 void on_client_heartbeat_timer(EV_P_ ev_timer *w, int revents);
@@ -146,7 +147,7 @@ void delete_hash(KcpevServer *kcpev)
 
 void kcpev_server_destroy(KcpevServer *kcpev)
 {
-    KcpevTcp_destroy(kcpev->loop, &kcpev->tcp);
+    //KcpevTcp_destroy(kcpev->loop, &kcpev->tcp);
     KcpevUdp_destroy(kcpev->loop, &kcpev->udp);
     delete_hash(kcpev);
     kcpev_free(kcpev);
@@ -956,6 +957,11 @@ void on_server_heartbeat_timer(EV_P_ ev_timer *w, int revents)
 
         set_kcp_invalid(client);
         //sock_send_command(client->tcp.sock, COMMAND_UDP_INVALID, (char *)&client->key, sizeof(KcpevKey));
+
+        //del from manager
+        check_destroy_kcp_timer(client);
+        delete_hash(client);
+
         return;
     }
 }
@@ -995,6 +1001,22 @@ error:
         kcpev_free(evh);
     kcpev->udp.evh = NULL;
     return -1;
+}
+
+// destroy kcp timer here
+int check_destroy_kcp_timer(Kcpev *kcpev)
+{
+    ev_timer_stop(kcpev->loop, kcpev->udp.evt);
+    if(kcpev->udp.evt)
+        kcpev_free(kcpev->udp.evt);
+    kcpev->udp.evt = NULL;
+
+    ev_timer_stop(kcpev->loop, kcpev->udp.evh);
+    if(kcpev->udp.evh)
+        kcpev_free(kcpev->udp.evh);
+    kcpev->udp.evh = NULL;
+
+    return 0;
 }
 
 // 如果 kcpev.conv 没有设置，说明还没有握手成功，来到这里收到服务端的udp包，直接设置kcp.conv
